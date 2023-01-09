@@ -29,23 +29,23 @@ if [ "$ARCHS" = "" ]; then
     echo ARCHS not defined. Using \"$ARCHS\"
 fi
 
-if [ "$ANDROID_NDK" = "" ]; then
+if [ "$NDKPATH" = "" ]; then
     if [ -d /opt/android-ndk ]; then
-        ANDROID_NDK=/opt/android-ndk
+        NDKPATH=/opt/android-ndk
     elif [ -d $HOME/android-ndk ]; then
-        ANDROID_NDK=$HOME/android-ndk
+        NDKPATH=$HOME/android-ndk
     else
-        echo ANDROID_NDK not defined. Aborting.
+        echo NDKPATH not defined. Aborting.
         exit 1
     fi
 fi
 
-SYSROOT=$ANDROID_NDK/platforms/android-19/arch-arm
+SYSROOT=$NDKPATH/platforms/android-19/arch-arm
 # Expand the prebuilt/* path into the correct one
 if [ "$(uname -m)" = "x86_64" ]; then
-    TOOLCHAIN=`echo $ANDROID_NDK/toolchains/arm-linux-androideabi-4.9/prebuilt/*-x86_64`
+    TOOLCHAIN=`echo $NDKPATH/toolchains/arm-linux-androideabi-4.9/prebuilt/*-x86_64`
 else
-    TOOLCHAIN=`echo $ANDROID_NDK/toolchains/arm-linux-androideabi-4.9/prebuilt/*-x86`
+    TOOLCHAIN=`echo $NDKPATH/toolchains/arm-linux-androideabi-4.9/prebuilt/*-x86`
 fi
 export PATH=$TOOLCHAIN/bin:$PATH
 echo $PATH
@@ -65,7 +65,6 @@ fi
 CROSS_FLAGS="--sysroot=$SYSROOT --cross-prefix=arm-linux-androideabi-"
 FFMPEG_FLAGS="$CROSS_FLAGS \
     --target-os=linux \
-    --enable-libx264 \
     --enable-gpl \
     --arch=arm \
     --enable-pic \
@@ -102,11 +101,11 @@ for arch in $ARCHS; do
             ;;
     esac
 
-    (
-        cd x264 && pwd && CFLAGS="$EXTRA_CFLAGS" LDFLAGS="$EXTRA_LDFLAGS" \
-        ./configure $CROSS_FLAGS --host=arm-linux-androideabi --enable-shared --disable-asm \
-        --prefix=../$X264_DEST --enable-shared && make clean && make -j 4 && make install
-    ) || echo Failed to build x264
+    # (
+    #     cd x264 && pwd && CFLAGS="$EXTRA_CFLAGS" LDFLAGS="$EXTRA_LDFLAGS" \
+    #     ./configure $CROSS_FLAGS --enable-static --host=arm-linux-androideabi --enable-shared --disable-asm --disable-opencl \
+    #     --prefix=../$X264_DEST --enable-shared && make clean && make -j 4 && make install
+    # ) || echo Failed to build x264
 
     EXTRA_CFLAGS="$EXTRA_CFLAGS -I../$X264_DEST/include"
     EXTRA_LDFLAGS="$EXTRA_LDFLAGS -L../$X264_DEST/lib"
@@ -121,16 +120,17 @@ for arch in $ARCHS; do
     VERSION=$( (cd ffmpeg && git rev-list HEAD -n 1 | cut -c 1-12) )
 
     (
+        #cp -vfr $X264_DEST/* $tmpdir/$ffdir && \
+        #tar cjvf $ffdir-bare.tar.bz2 $ffdir/bin $ffdir/lib/libx264* && \
+
         tmpdir=$(mktemp -d) && \
         ffdir=ffmpeg-$arch-$VERSION
         mkdir -p $tmpdir/$ffdir && \
-        cp -vfr $X264_DEST/* $tmpdir/$ffdir && \
         cp -vfr $FFMPEG_DEST/* $tmpdir/$ffdir && \
         cd $tmpdir && \
         tar cjvf $ffdir.tar.bz2 $ffdir && \
-        tar cjvf $ffdir-bare.tar.bz2 $ffdir/bin $ffdir/lib/libx264* && \
         cd - && \
-        mv $tmpdir/$ffdir{,-bare}.tar.bz2 dist/ && \
+        mv $tmpdir/$ffdir.tar.bz2 dist/ && \
         rm -fr $tmpdir
     ) || echo Failed to package ffmpeg + x264
 
