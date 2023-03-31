@@ -26,15 +26,30 @@
 #define STREAM_PIX_FMT    AV_PIX_FMT_RGB24 // AV_PIX_FMT_YUV420P /* default pix_fmt */
 #define STREAM_SRC_FMT    AV_PIX_FMT_RGB565LE /* src pix_fmt */
 
+static char * _av_err2str(int errnum)
+{
+    char tmp[AV_ERROR_MAX_STRING_SIZE] = {0};
+    return av_make_error_string(tmp, AV_ERROR_MAX_STRING_SIZE, errnum);
+}
+static char* _av_ts2timestr(int64_t ts, AVRational *tb)
+{
+    char tmp[AV_TS_MAX_STRING_SIZE] = {0};
+    return av_ts_make_time_string(tmp, ts, tb);
+}
+static char* _av_ts2str(int64_t ts)
+{
+    char tmp[AV_TS_MAX_STRING_SIZE] = {0};
+    return av_ts_make_string(tmp, ts);
+}
 
 static void log_packet(const AVFormatContext *fmt_ctx, const AVPacket *pkt)
 {
     AVRational *time_base = &fmt_ctx->streams[pkt->stream_index]->time_base;
 
-    LOG_INFOS("pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d",
-           av_ts2str(pkt->pts), av_ts2timestr(pkt->pts, time_base),
-           av_ts2str(pkt->dts), av_ts2timestr(pkt->dts, time_base),
-           av_ts2str(pkt->duration), av_ts2timestr(pkt->duration, time_base),
+    LOG_INFO("pts:%s pts_time:%s dts:%s dts_time:%s duration:%s duration_time:%s stream_index:%d",
+           _av_ts2str(pkt->pts), _av_ts2timestr(pkt->pts, time_base),
+           _av_ts2str(pkt->dts), _av_ts2timestr(pkt->dts, time_base),
+           _av_ts2str(pkt->duration), _av_ts2timestr(pkt->duration, time_base),
            pkt->stream_index);
 }
 
@@ -45,7 +60,7 @@ static int write_frame(AVFormatContext *fmt_ctx, AVCodecContext *c, AVStream *st
     // send the frame to the encoder
     ret = avcodec_send_frame(c, frame);
     if (ret < 0) {
-        LOG_ERRS("Error sending a frame to the encoder: %s", av_err2str(ret));
+        LOG_ERR("Error sending a frame to the encoder: %s", _av_err2str(ret));
     }
 
     while (ret >= 0) {
@@ -53,7 +68,7 @@ static int write_frame(AVFormatContext *fmt_ctx, AVCodecContext *c, AVStream *st
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
             break;
         else if (ret < 0) {
-            LOG_ERRS("Error encoding a frame: %s", av_err2str(ret));
+            LOG_ERR("Error encoding a frame: %s", _av_err2str(ret));
         }
 
         /* rescale output packet timestamp values from codec to stream timebase */
@@ -67,7 +82,7 @@ static int write_frame(AVFormatContext *fmt_ctx, AVCodecContext *c, AVStream *st
          * its contents and resets pkt), so that no unreferencing is necessary.
          * This would be different if one used av_write_frame(). */
         if (ret < 0) {
-            LOG_ERRS("Error while writing output packet: %s", av_err2str(ret));
+            LOG_ERR("Error while writing output packet: %s", _av_err2str(ret));
         }
     }
 
@@ -85,22 +100,22 @@ static void add_stream(OutputStream *ost, AVFormatContext *oc,
     /* find the encoder */
     *codec = avcodec_find_encoder(codec_id);
     if (!(*codec)) {
-        LOG_ERRS( "Could not find encoder for '%s'", avcodec_get_name(codec_id));
+        LOG_ERR( "Could not find encoder for '%s'", avcodec_get_name(codec_id));
     }
 
     ost->tmp_pkt = av_packet_alloc();
     if (!ost->tmp_pkt) {
-        LOG_ERRS( "Could not allocate AVPacket");
+        LOG_ERR( "Could not allocate AVPacket");
     }
 
     ost->st = avformat_new_stream(oc, NULL);
     if (!ost->st) {
-        LOG_ERRS("Could not allocate stream");
+        LOG_ERR("Could not allocate stream");
     }
     ost->st->id = oc->nb_streams-1;
     c = avcodec_alloc_context3(*codec);
     if (!c) {
-        LOG_ERRS("Could not alloc an encoding context");
+        LOG_ERR("Could not alloc an encoding context");
     }
     ost->enc = c;
 
@@ -120,7 +135,7 @@ static AVFrame *alloc_audio_frame(enum AVSampleFormat sample_fmt,
     int ret;
 
     if (!frame) {
-        LOG_ERRS("Error allocating an audio frame");
+        LOG_ERR("Error allocating an audio frame");
     }
 
     frame->format = sample_fmt;
@@ -131,7 +146,7 @@ static AVFrame *alloc_audio_frame(enum AVSampleFormat sample_fmt,
     if (nb_samples) {
         ret = av_frame_get_buffer(frame, 0);
         if (ret < 0) {
-            LOG_ERRS("Error allocating an audio buffer");
+            LOG_ERR("Error allocating an audio buffer");
         }
     }
 
@@ -153,7 +168,7 @@ static void open_audio(AVFormatContext *oc, const AVCodec *codec,
     ret = avcodec_open2(c, codec, &opt);
     av_dict_free(&opt);
     if (ret < 0) {
-        LOG_ERRS("Could not open audio codec: %s", av_err2str(ret));
+        LOG_ERR("Could not open audio codec: %s", _av_err2str(ret));
     }
 
     /* init signal generator */
@@ -176,13 +191,13 @@ static void open_audio(AVFormatContext *oc, const AVCodec *codec,
     /* copy the stream parameters to the muxer */
     ret = avcodec_parameters_from_context(ost->st->codecpar, c);
     if (ret < 0) {
-        LOG_ERRS("Could not copy the stream parameters");
+        LOG_ERR("Could not copy the stream parameters");
     }
 
     /* create resampler context */
     ost->swr_ctx = swr_alloc();
     if (!ost->swr_ctx) {
-        LOG_ERRS("Could not allocate resampler context");
+        LOG_ERR("Could not allocate resampler context");
     }
 
     /* set options */
@@ -195,7 +210,7 @@ static void open_audio(AVFormatContext *oc, const AVCodec *codec,
 
     /* initialize the resampling context */
     if ((ret = swr_init(ost->swr_ctx)) < 0) {
-        LOG_ERRS("Failed to initialize the resampling context");
+        LOG_ERR("Failed to initialize the resampling context");
     }
 }
 
@@ -250,7 +265,7 @@ static int write_audio_frame(AVFormatContext *oc, OutputStream *ost)
          */
         ret = av_frame_make_writable(ost->frame);
         if (ret < 0) {
-            LOG_ERRS("Error while make writable");
+            LOG_ERR("Error while make writable");
         }
 
         /* convert to destination format */
@@ -258,7 +273,7 @@ static int write_audio_frame(AVFormatContext *oc, OutputStream *ost)
                           ost->frame->data, dst_nb_samples,
                           (const uint8_t **)frame->data, frame->nb_samples);
         if (ret < 0) {
-            LOG_ERRS("Error while converting");
+            LOG_ERR("Error while converting");
         }
         frame = ost->frame;
 
@@ -288,7 +303,7 @@ static AVFrame *alloc_picture(enum AVPixelFormat pix_fmt, int width, int height)
     /* allocate the buffers for the frame data */
     ret = av_frame_get_buffer(picture, 0);
     if (ret < 0) {
-        LOG_ERRS("Could not allocate frame data.");
+        LOG_ERR("Could not allocate frame data.");
     }
 
     return picture;
@@ -311,13 +326,13 @@ static void open_video(AVFormatContext *oc, const AVCodec *codec,
     ret = avcodec_open2(c, codec, &opt);
     av_dict_free(&opt);
     if (ret < 0) {
-        LOG_ERRS("Could not open video codec: %s", av_err2str(ret));
+        LOG_ERR("Could not open video codec: %s", _av_err2str(ret));
     }
 
     /* allocate and init a re-usable frame */
     ost->frame = alloc_picture(c->pix_fmt, c->width, c->height);
     if (!ost->frame) {
-        LOG_ERRS("Could not allocate video frame");
+        LOG_ERR("Could not allocate video frame");
     }
 
     /* If the output format is not STREAM_SRC_FMT, then a temporary STREAM_SRC_FMT
@@ -327,14 +342,14 @@ static void open_video(AVFormatContext *oc, const AVCodec *codec,
     if (c->pix_fmt != STREAM_SRC_FMT) {
         ost->tmp_frame = alloc_picture(STREAM_SRC_FMT, c->width, c->height);
         if (!ost->tmp_frame) {
-            LOG_ERRS("Could not allocate temporary picture");
+            LOG_ERR("Could not allocate temporary picture");
         }
     }
 
     /* copy the stream parameters to the muxer */
     ret = avcodec_parameters_from_context(ost->st->codecpar, c);
     if (ret < 0) {
-        LOG_ERRS("Could not copy the stream parameters");
+        LOG_ERR("Could not copy the stream parameters");
     }
 }
 
@@ -372,7 +387,7 @@ static AVFrame *get_video_frame(OutputStream *ost)
     /* when we pass a frame to the encoder, it may keep a reference to it
      * internally; make sure we do not overwrite it here */
     if (av_frame_make_writable(ost->frame) < 0) {
-        LOG_ERRS("make writable faild ");
+        LOG_ERR("make writable faild ");
     }
 
     if (c->pix_fmt != STREAM_SRC_FMT) {
@@ -385,7 +400,7 @@ static AVFrame *get_video_frame(OutputStream *ost)
                                           c->pix_fmt,
                                           SCALE_FLAGS, NULL, NULL, NULL);
             if (!ost->sws_ctx) {
-                LOG_ERRS( "Could not initialize the conversion context");
+                LOG_ERR( "Could not initialize the conversion context");
             }
         }
         fill_yuv_image(ost->tmp_frame, ost->next_pts, c->width, c->height);
@@ -451,7 +466,7 @@ static AVFrame *get_file_video_frame(OutputStream *ost, char* fn)
     /* when we pass a frame to the encoder, it may keep a reference to it
      * internally; make sure we do not overwrite it here */
     if (av_frame_make_writable(ost->frame) < 0) {
-        LOG_ERRS("make writable failed ");
+        LOG_ERR("make writable failed ");
     }
 
     if (c->pix_fmt != STREAM_SRC_FMT) {
@@ -464,7 +479,7 @@ static AVFrame *get_file_video_frame(OutputStream *ost, char* fn)
                                           c->pix_fmt,
                                           SCALE_FLAGS, NULL, NULL, NULL);
             if (!ost->sws_ctx) {
-                LOG_ERRS("Could not initialize the conversion context");
+                LOG_ERR("Could not initialize the conversion context");
             }
         }
         /* Y */
@@ -482,12 +497,12 @@ static AVFrame *get_file_video_frame(OutputStream *ost, char* fn)
             for (y = 0; y < height; y++)
             {
                 int read = fread(&(pict->data[0][y * pict->linesize[0]]), 1, linesz, fp);
-                if(read != linesz) LOG_ERRS(" read failed with file %s %d/%d", fn, read, linesz);
+                if(read != linesz) LOG_ERR(" read failed with file %s %d/%d", fn, read, linesz);
             }
             fclose(fp);
         }
         else{
-            LOG_ERRS(" can not open file %s", fn);
+            LOG_ERR(" can not open file %s", fn);
         }
         //fill_yuv_image(ost->tmp_frame, ost->next_pts, c->width, c->height);
         sws_scale(ost->sws_ctx, (const uint8_t * const *) ost->tmp_frame->data,
@@ -514,7 +529,7 @@ static AVFrame *get_file_audio_frame(OutputStream *ost, char* fn)
     if(fp)
     {
         int read = fread(q, 4, frame->nb_samples, fp);
-        if(read != frame->nb_samples) LOG_ERRS(" read failed with file %s %d/%d", fn, read, frame->nb_samples);
+        if(read != frame->nb_samples) LOG_ERR(" read failed with file %s %d/%d", fn, read, frame->nb_samples);
         fclose(fp);
     }
 
@@ -545,7 +560,7 @@ int AviWriter::addFileVideoFrame(unsigned char* buffer, unsigned int sz)
     /* when we pass a frame to the encoder, it may keep a reference to it
      * internally; make sure we do not overwrite it here */
     if (av_frame_make_writable(ost->frame) < 0) {
-        LOG_ERRS(" make writable failed");
+        LOG_ERR(" make writable failed");
     }
     
     if (c->pix_fmt != STREAM_SRC_FMT) {
@@ -558,7 +573,7 @@ int AviWriter::addFileVideoFrame(unsigned char* buffer, unsigned int sz)
                                           c->pix_fmt,
                                           SCALE_FLAGS, NULL, NULL, NULL);
             if (!ost->sws_ctx) {
-                LOG_ERRS( "Could not initialize the conversion context");
+                LOG_ERR( "Could not initialize the conversion context");
             }
         }
         AVFrame *pict = ost->tmp_frame;
@@ -574,7 +589,7 @@ int AviWriter::addFileVideoFrame(unsigned char* buffer, unsigned int sz)
                   ost->frame->linesize);
     }
     else{
-        LOG_ERRS("  c->pix not right ");
+        LOG_ERR("  c->pix not right ");
     }
     
     ost->frame->pts = ost->next_pts++;
@@ -584,22 +599,22 @@ int AviWriter::addFileVideoFrame(unsigned char* buffer, unsigned int sz)
 
 AviWriter::AviWriter(const char* filename, int videoWidth, int videoHeight)
 {
-    LOG_INFOS(" ");
+    LOG_INFO(" ");
     memset(&video_st_, 0, sizeof(video_st_));
-    LOG_INFOS(" ");
+    LOG_INFO(" ");
     memset(&audio_st_, 0, sizeof(audio_st_));
-    LOG_INFOS(" ");
+    LOG_INFO(" ");
     filename_ = (char*)filename;
     outVideoWidth_ = videoWidth;
     outVideoHeight_ = videoHeight;
     /* allocate the output media context */
     avformat_alloc_output_context2(&oc_, NULL, "apng", filename_);
     if (!oc_) {
-        LOG_INFOS("Could not deduce output format from file extension: using MPEG.");
+        LOG_INFO("Could not deduce output format from file extension: using MPEG.");
         avformat_alloc_output_context2(&oc_, NULL, "mpeg", filename_);
     }
     if (!oc_){
-        LOG_ERRS(" alloc oc failed ");
+        LOG_ERR(" alloc oc failed ");
     }
     fmt_ = oc_->oformat;
     //fmt->video_codec=AV_CODEC_ID_H264;
@@ -687,14 +702,14 @@ AviWriter::AviWriter(const char* filename, int videoWidth, int videoHeight)
     if (!(fmt_->flags & AVFMT_NOFILE)) {
         ret = avio_open(&oc_->pb, filename_, AVIO_FLAG_WRITE);
         if (ret < 0) {
-            LOG_ERRS("Could not open '%s': %s", filename_, av_err2str(ret));
+            LOG_ERR("Could not open '%s': %s", filename_, _av_err2str(ret));
         }
     }
 
     /* Write the stream header, if any. */
     ret = avformat_write_header(oc_, &opt_);
     if (ret < 0) {
-        LOG_ERRS("Error occurred when opening output file: %s", av_err2str(ret));
+        LOG_ERR("Error occurred when opening output file: %s", _av_err2str(ret));
     }
     return;
 }
@@ -740,7 +755,7 @@ int frame_writeavi(unsigned char* buffer, unsigned int sz)
     /* when we pass a frame to the encoder, it may keep a reference to it
      * internally; make sure we do not overwrite it here */
     if (av_frame_make_writable(ost->frame) < 0) {
-        LOG_ERRS(" make writable failed");
+        LOG_ERR(" make writable failed");
     }
     
     if (c->pix_fmt != STREAM_SRC_FMT) {
@@ -753,7 +768,7 @@ int frame_writeavi(unsigned char* buffer, unsigned int sz)
                                           c->pix_fmt,
                                           SCALE_FLAGS, NULL, NULL, NULL);
             if (!ost->sws_ctx) {
-                LOG_ERRS( "Could not initialize the conversion context");
+                LOG_ERR( "Could not initialize the conversion context");
             }
         }
         AVFrame *pict = ost->tmp_frame;
@@ -769,7 +784,7 @@ int frame_writeavi(unsigned char* buffer, unsigned int sz)
                   ost->frame->linesize);
     }
     else{
-        LOG_ERRS("  c->pix not right ");
+        LOG_ERR("  c->pix not right ");
     }
     
     ost->frame->pts = ost->next_pts++;
@@ -779,22 +794,22 @@ int frame_writeavi(unsigned char* buffer, unsigned int sz)
 
 int init_writeavi(const char* filename, int videoWidth, int videoHeight)
 {
-    LOG_INFOS(" ");
+    LOG_INFO(" ");
     memset(&video_st_, 0, sizeof(video_st_));
-    LOG_INFOS(" ");
+    LOG_INFO(" ");
     memset(&audio_st_, 0, sizeof(audio_st_));
-    LOG_INFOS(" ");
+    LOG_INFO(" ");
     filename_ = (char*)filename;
     outVideoWidth_ = videoWidth;
     outVideoHeight_ = videoHeight;
     /* allocate the output media context */
     avformat_alloc_output_context2(&oc_, NULL, "apng", filename_);
     if (!oc_) {
-        LOG_INFOS("Could not deduce output format from file extension: using MPEG.");
+        LOG_INFO("Could not deduce output format from file extension: using MPEG.");
         avformat_alloc_output_context2(&oc_, NULL, "mpeg", filename_);
     }
     if (!oc_){
-        LOG_ERRS(" alloc oc failed ");
+        LOG_ERR(" alloc oc failed ");
     }
     fmt_ = oc_->oformat;
     //fmt->video_codec=AV_CODEC_ID_H264;
@@ -882,14 +897,14 @@ int init_writeavi(const char* filename, int videoWidth, int videoHeight)
     if (!(fmt_->flags & AVFMT_NOFILE)) {
         ret = avio_open(&oc_->pb, filename_, AVIO_FLAG_WRITE);
         if (ret < 0) {
-            LOG_ERRS("Could not open '%s': %s", filename_, av_err2str(ret));
+            LOG_ERR("Could not open '%s': %s", filename_, _av_err2str(ret));
         }
     }
 
     /* Write the stream header, if any. */
     ret = avformat_write_header(oc_, &opt_);
     if (ret < 0) {
-        LOG_ERRS("Error occurred when opening output file: %s", av_err2str(ret));
+        LOG_ERR("Error occurred when opening output file: %s", _av_err2str(ret));
     }
     return 0;
 }
